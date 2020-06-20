@@ -5,7 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 )
 
 var (
@@ -34,6 +36,7 @@ func init() {
 
 func main() {
 	flag.Parse()
+	fmt.Println(dryRun)
 
 	err := getFiles()
 	if err != nil {
@@ -65,11 +68,47 @@ func getFiles() error {
 		return fmt.Errorf("Error decoding response body: %v", err)
 	}
 
+	// create the directory that the files will be downloaded to
+	// if this is not a dry run
+	if !dryRun {
+		// TODO check if dir is empty string
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			os.Mkdir(dir, os.ModePerm)
+		}
+	}
+
 	// list file items
+	// TODO skip over directories
 	for _, item := range fileList {
 		if dryRun {
 			fmt.Println(item.Name, item.Size)
 			continue
+		}
+
+		// create an empty file in the sub directory for this file
+		// TODO check if dir is empty string
+		out, err := os.Create(fmt.Sprintf("%s/%s", dir, item.Name))
+		if err != nil {
+			return fmt.Errorf("Error creating file: %s: %v", item.Name, err)
+		}
+		defer out.Close()
+
+		// get the download url
+		res, err := http.Get(item.DownloadURL)
+		if err != nil {
+			return fmt.Errorf("Error doing get request on file: %s: %v", item.Name, err)
+		}
+		defer res.Body.Close()
+
+		// if the response code is not ok, bail out
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("Unexpected response code for file: %s: %v", item.Name, err)
+		}
+
+		// copy the contents to the empty file
+		_, err = io.Copy(out, res.Body)
+		if err != nil {
+			return fmt.Errorf("Error saving file contents for file: %s: %v", item.Name, err)
 		}
 	}
 
